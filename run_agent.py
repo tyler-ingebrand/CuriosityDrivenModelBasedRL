@@ -4,12 +4,12 @@ from env_functions.pendulum import *
 from src.UnknownDynamicsAgent import UnknownDynamicsAgent
 
 # create some env
-env = gym.make("Pendulum-v1")#, render_mode="human")
+env = gym.make("Pendulum-v1", render_mode="human")
 obs, info = env.reset()
 
 # create agent based on that env
-# agent = KnownDynamicsAgent(env.action_space, pendelum_reward, pendelum_value, pendelum_dynamics, torch.optim.SGD, {"lr": 0.1}, 10, 1000)
-agent = UnknownDynamicsAgent(env.observation_space, env.action_space, pendelum_reward, pendelum_value,  torch.optim.SGD, {"lr": 0.1}, 10, 1000)
+agent = KnownDynamicsAgent(env.action_space, pendelum_reward, pendelum_value, pendelum_dynamics, torch.optim.SGD, {"lr": 0.1}, 10, 1000)
+# agent = UnknownDynamicsAgent(env.observation_space, env.action_space, pendelum_reward, pendelum_value,  torch.optim.SGD, {"lr": 0.1}, 10, 1000)
 
 # iterate to see what happens
 for step in range(200):

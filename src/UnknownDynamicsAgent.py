@@ -66,7 +66,7 @@ class UnknownDynamicsAgent(Agent):
             opt.zero_grad()
 
             # predict the value of current actions
-            value = self.predict_value(state, actions)
+            value = -self.predict_value(state, actions)
 
             # compute gradients
             # value.backward()

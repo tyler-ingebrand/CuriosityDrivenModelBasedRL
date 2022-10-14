@@ -29,24 +29,26 @@ class KnownDynamicsAgent(Agent):
     # helper to choose the actions given an initial state
     def choose_actions(self, state):
         # convert state to torch tensor, create random initial actions
-        state = torch.tensor(state)
-        actions = torch.randn(self.look_ahead_steps, self.action_space.shape[0], requires_grad=True)
-
-        # create an optimizer from the class type specified
-        opt = self.optimizer_type([actions], **self.optimizer_kwargs)
+        state = torch.tensor(state, requires_grad=False)
+        # actions = torch.randn(self.look_ahead_steps, self.action_space.shape[0], requires_grad=True)
+        actions = torch.zeros(self.look_ahead_steps, self.action_space.shape[0], requires_grad=True)
 
         # descent
         for i in range(self.descent_steps):
-            # predict the value of current actions
-            value = self.predict_value(state, actions)
-
-            # compute gradients
-            # value.backward()
-            opt.step()
+            # create an optimizer from the class type specified
+            opt = self.optimizer_type([actions], **self.optimizer_kwargs)
             opt.zero_grad()
 
+            # predict the value of current actions
+            value = -self.predict_value(state, actions)
+
+            # compute gradients
+            value.backward()
+            opt.step()
+            # print(actions)
+
             # project value back into action space
-            actions = torch.clamp(actions, torch.from_numpy(self.action_space.low), torch.from_numpy(self.action_space.high))
+            # actions = torch.clamp(actions, torch.from_numpy(self.action_space.low), torch.from_numpy(self.action_space.high))
         return actions[0].detach().numpy()
 
     # helper to predict the value of a trajectory given an initial state and choice of actions
@@ -61,6 +63,9 @@ class KnownDynamicsAgent(Agent):
             state = next_state
 
         # account for final state's infinite horizon value
+        print(sum_value)
         sum_value += self.value_function(state)
+        print(self.value_function(state))
+        print()
 
         return sum_value

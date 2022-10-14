@@ -44,4 +44,4 @@ def pendelum_reward(s, a, next_s):
 
 
 def pendelum_value(s):
-    return (s[0] - 1) ** 2.0 * 100  # if pendelum = up and down, value = 0. Otherwise value is negative
+    return -(s[0] - 1) ** 2.0 * 10  # if pendelum = up and down, value = 0. Otherwise value is negative
