@@ -1,5 +1,8 @@
 import torch
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
 def angle_normalize(x) :
     return ((x + torch.pi) % (2 * torch.pi)) - torch.pi
 
@@ -39,7 +42,7 @@ def pendelum_dynamics(s, a):
 def pendelum_reward(s, a, next_s):
     th, thdot = sincos_to_angle(s[1], s[0]), s[2]
     # costs = torch.tensor([angle_normalize(th) ** 2 + 0.1 * thdot ** 2 + 0.001 * (a[0] ** 2)], requires_grad=True)
-    costs = torch.tensor([angle_normalize(th) ** 2 + 0.1 * thdot ** 2], requires_grad=True)
+    costs = angle_normalize(th) ** 2 + 0.1 * thdot ** 2
     return -costs
 
 

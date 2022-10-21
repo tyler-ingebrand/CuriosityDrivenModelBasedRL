@@ -60,3 +60,29 @@ z.backward()
 opt.step()
 print(x)
 print(y)
+
+print("\nPart 6")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+x = torch.tensor([3.0, 2.0], device=device) # create tensor without requires_grad = true
+w = torch.tensor([[2.0, 5.0]], requires_grad = True, device=device)
+b = torch.tensor([5.0], requires_grad = True, device=device)
+y = torch.matmul(w, x) + b
+print("y:", y)
+y.backward()
+print("x.grad :", x.grad)
+print("w.grad :", w.grad)
+print("b.grad :", b.grad)
+
+
+print("\nFinal opt")
+x_pre = torch.tensor([1.0, 3.0, 4.0], requires_grad=True, device=device)
+x = x_pre.clone().detach().to(device).requires_grad_()
+y = torch.tensor([4.0, 5.0, 6.0], requires_grad=True, device=device)
+opt = torch.optim.SGD([x], lr=0.1)
+opt.zero_grad()
+z = x + y
+z = sum(z)
+z.backward()
+opt.step()
+print(x)
+print(y)

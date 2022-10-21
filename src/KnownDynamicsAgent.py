@@ -16,6 +16,7 @@ class KnownDynamicsAgent(Agent):
                  early_termination_difference=1e-4,
                  # Gradient descent terminates early if the difference between 2 steps is less than this amount
                  ):
+        self.device = torch.device("cpu")# "cuda:0" if torch.cuda.is_available() else "cpu")
         self.action_space = action_space
         self.reward_function = reward_function
         self.value_function = value_function
@@ -25,7 +26,11 @@ class KnownDynamicsAgent(Agent):
         self.look_ahead_steps = look_ahead_steps
         self.descent_steps = descent_steps
         self.early_termination_difference = early_termination_difference
-        self.warm_start = torch.zeros(self.look_ahead_steps, self.action_space.shape[0])
+        self.warm_start = torch.zeros((self.look_ahead_steps, self.action_space.shape[0]), device=self.device)
+
+        self.action_low = torch.tensor(action_space.low, device=self.device)
+        self.action_high = torch.tensor(action_space.high, device=self.device)
+
 
     def __call__(self, state):
         return self.choose_actions(state)
@@ -33,8 +38,8 @@ class KnownDynamicsAgent(Agent):
     # helper to choose the actions given an initial state
     def choose_actions(self, state):
         # torch.autograd.set_detect_anomaly(True) # use this if you have an autograd issue
-        actions = self.warm_start.clone().detach().requires_grad_(True)
-        state = torch.tensor(state, requires_grad=False)
+        actions = self.warm_start.clone().detach().to(self.device).requires_grad_()
+        state = torch.tensor(state, requires_grad=False, device=self.device)
 
         # save last action for early termination checking
         last_action = actions.clone().detach()
@@ -54,32 +59,34 @@ class KnownDynamicsAgent(Agent):
 
             # project action back into action space
             actions = torch.clamp(actions,
-                                  torch.from_numpy(self.action_space.low),
-                                  torch.from_numpy(self.action_space.high)).clone().detach().requires_grad_(True)
+                                  self.action_low,
+                                  self.action_high
+                                  ).clone().detach().to(self.device).requires_grad_()
 
             # Check for early termination. Terminate if action has not changed more than some amount
             if torch.linalg.norm(actions - last_action) < self.early_termination_difference:
                 break
-            last_action = actions.clone().detach()
+            last_action = actions.clone().detach().to(self.device)
 
         # remember plan for warm start. This makes it find plan faster next time.
         self.warm_start[:-1] = actions[1:]
         self.warm_start[-1] = actions[-1]  # clone last action and assume we reuse it. Works ok, but hackish.
 
         # Return first action to take
-        return actions[0].detach().numpy()
+        return actions[0].detach().cpu().numpy()
 
     # helper to predict the value of a trajectory given an initial state and choice of actions
     # This is differentiable WRT actions
     def predict_value(self, initial_state, actions):
-        state = initial_state
-        values = 0.0
+        state = initial_state.clone().detach().to(self.device)
+        values = torch.tensor(0.0, device=self.device)
 
         # for each action in our lookahead, simulate transition
         # Account for reward received
         for i, action in enumerate(actions):
             next_state = self.dynamics_function(state, action)
-            values += self.reward_function(state, action, next_state)
+            reward = self.reward_function(state, action, next_state)
+            values = values + reward
             state = next_state
 
         # account for final state's infinite horizon value

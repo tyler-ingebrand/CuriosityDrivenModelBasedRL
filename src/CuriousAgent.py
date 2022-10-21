@@ -6,7 +6,7 @@ from .interface import Agent
 from .replay_buffer import Replay_Buffer
 
 
-class UnknownDynamicsAgent(Agent):
+class CuriousAgent(Agent):
     def __init__(self,
                  state_space,
                  action_space,  # action space from gym
@@ -21,6 +21,7 @@ class UnknownDynamicsAgent(Agent):
                  exploration_steps=50_000,
                  train_every_N_steps=500,
                  early_termination_difference=1e-4,
+                 curiosity_weight=0.0
                  ):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -37,6 +38,7 @@ class UnknownDynamicsAgent(Agent):
         self.descent_steps = descent_steps
         self.early_termination_difference = early_termination_difference
         self.warm_start = torch.zeros(self.look_ahead_steps, self.action_space.shape[0]).to(self.device)
+        self.curiosity_weight = curiosity_weight
 
         # General traniing variables
         self.train_every_N_steps = train_every_N_steps
@@ -53,15 +55,34 @@ class UnknownDynamicsAgent(Agent):
         self.model_number_batches = 10
         self.model_descent_steps = 100
         self._create_dynamics()
+        self._create_inverse_and_backwards()
 
     def _create_dynamics(self):
         # Create dynamics model and optimizer
         ns = self.state_space.shape[0]
         na = self.action_space.shape[0]
-        self.dynamics_approximator = nn.Sequential(nn.Linear(ns + na, 64), nn.ReLU(),
-                                                   nn.Linear(64, 64), nn.ReLU(),
-                                                   nn.Linear(64, ns)).to(self.device)
-        self.dynamics_optimizer = torch.optim.Adam(self.dynamics_approximator.parameters())
+        self.forwards_model = nn.Sequential(nn.Linear(ns + na, 64), nn.ReLU(),
+                                            nn.Linear(64, 64), nn.ReLU(),
+                                            nn.Linear(64, ns)).to(self.device)
+        self.forwards_optimizer = torch.optim.Adam(self.forwards_model.parameters())
+
+    def _create_inverse_and_backwards(self):
+        # Create dynamics model and optimizer
+        ns = self.state_space.shape[0]
+        na = self.action_space.shape[0]
+
+        # Inverse model, predicts s,s' -> a
+        self.inverse_model = nn.Sequential(nn.Linear(ns + ns, 64), nn.ReLU(),
+                                           nn.Linear(64, 64), nn.ReLU(),
+                                           nn.Linear(64, na)).to(self.device)
+        self.inverse_optimizer = torch.optim.Adam(self.inverse_model.parameters())
+
+        # backwards model, predicts s',a -> s
+        self.backwards_model = nn.Sequential(nn.Linear(ns + na, 64), nn.ReLU(),
+                                             nn.Linear(64, 64), nn.ReLU(),
+                                             nn.Linear(64, ns)).to(self.device)
+        self.backwards_optimizer = torch.optim.Adam(self.backwards_model.parameters())
+
     def __call__(self, state):
         if self.exploration_steps > self.current_step:  # some initial random search phase to collect data fast
             return self.action_space.sample()
@@ -73,7 +94,6 @@ class UnknownDynamicsAgent(Agent):
         self.current_step += 1
         if self.current_step % self.train_every_N_steps == 0:
             self.improve_model()
-
 
     # helper to choose the actions given an initial state
     def choose_actions(self, state):
@@ -120,15 +140,34 @@ class UnknownDynamicsAgent(Agent):
         state = initial_state
         values = 0.0
 
+        temp_reward = 0.0
+        temp_curiosity = 0.0
+
         # for each action in our lookahead, simulate transition
         # Account for reward received
         for i, action in enumerate(actions):
-            next_state = self.dynamics_approximator(torch.cat((state, action)))
-            values += self.reward_function(state, action, next_state)
+            # predict next state
+            next_state = self.forwards_model(torch.cat((state, action)))
+
+            # calculate model error
+            state_prediction = self.backwards_model(torch.cat((next_state, action)))
+            action_prediction = self.inverse_model(torch.cat((state, next_state)))
+            error = torch.linalg.norm(state - state_prediction) + torch.linalg.norm(action - action_prediction)
+
+            # temp
+            temp_reward += self.reward_function(state, action, next_state)
+            temp_curiosity += error * self.curiosity_weight
+
+            # add reward and error * curiosity_weight to value, then continue
+            values += self.reward_function(state, action, next_state) + error * self.curiosity_weight
             state = next_state
 
         # account for final state's infinite horizon value
         values += self.value_function(state)
+
+        #print("Curiosity bonus ", temp_curiosity)
+        #print("reward bonus ", temp_reward)
+        #print("Value bonus ", self.value_function(state))
         return values
 
     def improve_model(self):
@@ -136,8 +175,24 @@ class UnknownDynamicsAgent(Agent):
             states, actions, next_states = self.replay_buffer.sample(self.model_batch_size)
 
             for descent_steps in range(self.model_descent_steps):
-                self.dynamics_approximator.zero_grad()
+
+                # improve forward model
+                self.forwards_model.zero_grad()
                 forward_inputs = torch.cat((states, actions), dim=1)
-                loss = nn.MSELoss()(self.dynamics_approximator(forward_inputs), next_states)
+                loss = nn.MSELoss()(self.forwards_model(forward_inputs), next_states)
                 loss.backward()
-                self.dynamics_optimizer.step()
+                self.forwards_optimizer.step()
+
+                # improve backwards model
+                self.backwards_model.zero_grad()
+                backwards_inputs = torch.cat((next_states, actions), dim=1)
+                loss = nn.MSELoss()(self.backwards_model(backwards_inputs), states)
+                loss.backward()
+                self.backwards_optimizer.step()
+
+                # improve inverse model
+                self.inverse_model.zero_grad()
+                inverse_inputs = torch.cat((states, next_states), dim=1)
+                loss = nn.MSELoss()(self.inverse_model(inverse_inputs), actions)
+                loss.backward()
+                self.inverse_optimizer.step()
