@@ -12,7 +12,9 @@ class KnownDynamicsAgent(Agent):
                  optimizer_type,  # which gradient descent method to optimize by. This should be a class, not an object
                  optimizer_kwargs,  # arguments to use to create the optimizer, such as learning rate
                  look_ahead_steps,  # how far to lookahead into the future
-                 descent_steps  # How many times to do gradient descent each time we need an action
+                 descent_steps,  # How many times to do gradient descent each time we need an action
+                 early_termination_difference=1e-4,
+                 # Gradient descent terminates early if the difference between 2 steps is less than this amount
                  ):
         self.action_space = action_space
         self.reward_function = reward_function
@@ -22,50 +24,64 @@ class KnownDynamicsAgent(Agent):
         self.optimizer_kwargs = optimizer_kwargs
         self.look_ahead_steps = look_ahead_steps
         self.descent_steps = descent_steps
+        self.early_termination_difference = early_termination_difference
+        self.warm_start = torch.zeros(self.look_ahead_steps, self.action_space.shape[0])
 
     def __call__(self, state):
         return self.choose_actions(state)
 
     # helper to choose the actions given an initial state
     def choose_actions(self, state):
-        # convert state to torch tensor, create random initial actions
+        # torch.autograd.set_detect_anomaly(True) # use this if you have an autograd issue
+        actions = self.warm_start.clone().detach().requires_grad_(True)
         state = torch.tensor(state, requires_grad=False)
-        # actions = torch.randn(self.look_ahead_steps, self.action_space.shape[0], requires_grad=True)
-        actions = torch.zeros(self.look_ahead_steps, self.action_space.shape[0], requires_grad=True)
 
-        # descent
+        # save last action for early termination checking
+        last_action = actions.clone().detach()
+
+        # Loop for some number of optimization steps
         for i in range(self.descent_steps):
-            # create an optimizer from the class type specified
+            # Generate optimizer. Have to regenerate every step because we clamp the actions.
             opt = self.optimizer_type([actions], **self.optimizer_kwargs)
             opt.zero_grad()
 
             # predict the value of current actions
-            value = -self.predict_value(state, actions)
+            negative_value = -self.predict_value(state, actions)
 
             # compute gradients
-            value.backward()
-            opt.step()
-            # print(actions)
+            negative_value.backward()
+            opt.step()  # minimizes negative value = maximize value
 
-            # project value back into action space
-            # actions = torch.clamp(actions, torch.from_numpy(self.action_space.low), torch.from_numpy(self.action_space.high))
+            # project action back into action space
+            actions = torch.clamp(actions,
+                                  torch.from_numpy(self.action_space.low),
+                                  torch.from_numpy(self.action_space.high)).clone().detach().requires_grad_(True)
+
+            # Check for early termination. Terminate if action has not changed more than some amount
+            if torch.linalg.norm(actions - last_action) < self.early_termination_difference:
+                break
+            last_action = actions.clone().detach()
+
+        # remember plan for warm start. This makes it find plan faster next time.
+        self.warm_start[:-1] = actions[1:]
+        self.warm_start[-1] = actions[-1]  # clone last action and assume we reuse it. Works ok, but hackish.
+
+        # Return first action to take
         return actions[0].detach().numpy()
 
     # helper to predict the value of a trajectory given an initial state and choice of actions
+    # This is differentiable WRT actions
     def predict_value(self, initial_state, actions):
-        sum_value = 0
         state = initial_state
+        values = 0.0
 
-        # for each action in our lookahead, account for reward received
-        for action in actions:
+        # for each action in our lookahead, simulate transition
+        # Account for reward received
+        for i, action in enumerate(actions):
             next_state = self.dynamics_function(state, action)
-            sum_value += self.reward_function(state, action, next_state)
+            values += self.reward_function(state, action, next_state)
             state = next_state
 
         # account for final state's infinite horizon value
-        print(sum_value)
-        sum_value += self.value_function(state)
-        print(self.value_function(state))
-        print()
-
-        return sum_value
+        values += self.value_function(state)
+        return values

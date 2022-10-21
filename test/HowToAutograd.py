@@ -1,3 +1,4 @@
+import numpy
 import torch
 
 # calculate deriv of 1D function
@@ -46,3 +47,16 @@ out.backward()
 print("x.grad :", x.grad)
 print("y.grad :", y.grad)
 print("z.grad :", z.grad)
+
+
+print("\nFinal opt")
+x = torch.tensor([1.0, 3.0, 4.0], requires_grad=True)
+y = torch.tensor([4.0, 5.0, 6.0], requires_grad=True)
+opt = torch.optim.SGD([x], lr=0.1)
+opt.zero_grad()
+z = x + y
+z = sum(z)
+z.backward()
+opt.step()
+print(x)
+print(y)

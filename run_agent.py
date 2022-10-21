@@ -5,10 +5,13 @@ from src.UnknownDynamicsAgent import UnknownDynamicsAgent
 
 # create some env
 env = gym.make("Pendulum-v1", render_mode="human")
-obs, info = env.reset()
+obs, info = env.reset()  # seed1 = upright start
 
 # create agent based on that env
-agent = KnownDynamicsAgent(env.action_space, pendelum_reward, pendelum_value, pendelum_dynamics, torch.optim.SGD, {"lr": 0.1}, 10, 1000)
+agent = KnownDynamicsAgent(env.action_space,
+                           pendelum_reward, pendelum_value, pendelum_dynamics, # env functions
+                           torch.optim.SGD, {"lr": 0.1},  # MPC optimizer type and arguments
+                           look_ahead_steps=10, descent_steps=1000)
 # agent = UnknownDynamicsAgent(env.observation_space, env.action_space, pendelum_reward, pendelum_value,  torch.optim.SGD, {"lr": 0.1}, 10, 1000)
 
 # iterate to see what happens
@@ -23,8 +26,7 @@ for step in range(200):
     agent.learn(obs, action, next_obs, reward)
 
     # for our sake
-    # env.render()
-    print(step, ": S ", obs, ", A ", action)
+    # print(step, ": S ", obs, ", A ", action)
 
     # reset if needed, otherwise continue
     if done:
