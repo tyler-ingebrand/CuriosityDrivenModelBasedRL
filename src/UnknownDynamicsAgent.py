@@ -18,7 +18,6 @@ class UnknownDynamicsAgent(Agent):
                  optimizer_kwargs,  # arguments to use to create the optimizer, such as learning rate
                  descent_steps,  # How many times to do gradient descent each time we need an action
                  look_ahead_steps=10,  # how far to lookahead into the future max. Starts at 0, increments to this
-                 exploration_steps=50_000,
                  train_every_N_steps=500,
                  early_termination_difference=1e-4,
                  ):
@@ -40,7 +39,6 @@ class UnknownDynamicsAgent(Agent):
 
         # General traniing variables
         self.train_every_N_steps = train_every_N_steps
-        self.exploration_steps = exploration_steps
         self.action_low = torch.tensor(action_space.low).to(self.device)
         self.action_high = torch.tensor(action_space.high).to(self.device)
         self.current_step = 0
@@ -53,6 +51,7 @@ class UnknownDynamicsAgent(Agent):
         self.model_number_batches = 10
         self.model_descent_steps = 100
         self._create_dynamics()
+        self.set_exploit(False)
 
     def _create_dynamics(self):
         # Create dynamics model and optimizer
@@ -62,8 +61,14 @@ class UnknownDynamicsAgent(Agent):
                                                    nn.Linear(64, 64), nn.ReLU(),
                                                    nn.Linear(64, ns)).to(self.device)
         self.dynamics_optimizer = torch.optim.Adam(self.dynamics_approximator.parameters())
+
+    def set_exploit(self, value):
+        self.exploit = value
+        # for p in self.dynamics_approximator.parameters():
+        #     p.requires_grad = not value
+
     def __call__(self, state):
-        if self.exploration_steps > self.current_step:  # some initial random search phase to collect data fast
+        if not self.exploit:  # some initial random search phase to collect data fast
             return self.action_space.sample()
         else:
             return self.choose_actions(state)
@@ -73,7 +78,6 @@ class UnknownDynamicsAgent(Agent):
         self.current_step += 1
         if self.current_step % self.train_every_N_steps == 0:
             self.improve_model()
-
 
     # helper to choose the actions given an initial state
     def choose_actions(self, state):

@@ -27,13 +27,18 @@ class KnownDynamicsAgent(Agent):
         self.descent_steps = descent_steps
         self.early_termination_difference = early_termination_difference
         self.warm_start = torch.zeros((self.look_ahead_steps, self.action_space.shape[0]), device=self.device)
-
+        self.exploit = False
         self.action_low = torch.tensor(action_space.low, device=self.device)
         self.action_high = torch.tensor(action_space.high, device=self.device)
 
+    def set_exploit(self, value):
+        self.exploit = value
 
     def __call__(self, state):
-        return self.choose_actions(state)
+        if not self.exploit:
+            return self.action_space.sample()
+        else:
+            return self.choose_actions(state)
 
     # helper to choose the actions given an initial state
     def choose_actions(self, state):

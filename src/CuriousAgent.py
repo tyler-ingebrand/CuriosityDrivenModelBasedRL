@@ -18,7 +18,6 @@ class CuriousAgent(Agent):
                  optimizer_kwargs,  # arguments to use to create the optimizer, such as learning rate
                  descent_steps,  # How many times to do gradient descent each time we need an action
                  look_ahead_steps=10,  # how far to lookahead into the future max. Starts at 0, increments to this
-                 exploration_steps=50_000,
                  train_every_N_steps=500,
                  early_termination_difference=1e-4,
                  curiosity_weight=0.0
@@ -42,7 +41,6 @@ class CuriousAgent(Agent):
 
         # General traniing variables
         self.train_every_N_steps = train_every_N_steps
-        self.exploration_steps = exploration_steps
         self.action_low = torch.tensor(action_space.low).to(self.device)
         self.action_high = torch.tensor(action_space.high).to(self.device)
         self.current_step = 0
@@ -56,6 +54,7 @@ class CuriousAgent(Agent):
         self.model_descent_steps = 100
         self._create_dynamics()
         self._create_inverse_and_backwards()
+        self.set_exploit(False)
 
     def _create_dynamics(self):
         # Create dynamics model and optimizer
@@ -84,7 +83,7 @@ class CuriousAgent(Agent):
         self.backwards_optimizer = torch.optim.Adam(self.backwards_model.parameters())
 
     def __call__(self, state):
-        if self.exploration_steps > self.current_step:  # some initial random search phase to collect data fast
+        if not self.exploit:  # some initial random search phase to collect data fast
             return self.action_space.sample()
         else:
             return self.choose_actions(state)
@@ -140,8 +139,8 @@ class CuriousAgent(Agent):
         state = initial_state
         values = 0.0
 
-        temp_reward = 0.0
-        temp_curiosity = 0.0
+        # temp_reward = 0.0
+        # temp_curiosity = 0.0
 
         # for each action in our lookahead, simulate transition
         # Account for reward received
@@ -155,8 +154,8 @@ class CuriousAgent(Agent):
             error = torch.linalg.norm(state - state_prediction) + torch.linalg.norm(action - action_prediction)
 
             # temp
-            temp_reward += self.reward_function(state, action, next_state)
-            temp_curiosity += error * self.curiosity_weight
+            # temp_reward += self.reward_function(state, action, next_state)
+            # temp_curiosity += error * self.curiosity_weight
 
             # add reward and error * curiosity_weight to value, then continue
             values += self.reward_function(state, action, next_state) + error * self.curiosity_weight
@@ -165,17 +164,24 @@ class CuriousAgent(Agent):
         # account for final state's infinite horizon value
         values += self.value_function(state)
 
-        #print("Curiosity bonus ", temp_curiosity)
-        #print("reward bonus ", temp_reward)
-        #print("Value bonus ", self.value_function(state))
+        # print("Curiosity bonus ", temp_curiosity)
+        # print("reward bonus ", temp_reward)
+        # print("Value bonus ", self.value_function(state))
         return values
 
+    def set_exploit(self, value):
+        self.exploit = value
+        # for p in self.forwards_model.parameters():
+        #     p.requires_grad = not value
+        # for p in self.backwards_model.parameters():
+        #     p.requires_grad = not value
+        # for p in self.inverse_model.parameters():
+        #     p.requires_grad = not value
     def improve_model(self):
         for batch in range(self.model_number_batches):
             states, actions, next_states = self.replay_buffer.sample(self.model_batch_size)
 
             for descent_steps in range(self.model_descent_steps):
-
                 # improve forward model
                 self.forwards_model.zero_grad()
                 forward_inputs = torch.cat((states, actions), dim=1)

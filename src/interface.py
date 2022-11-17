@@ -9,4 +9,6 @@ class Agent:
     def learn(self, state, action, next_state, reward):
         pass
 
+    def set_exploit(self, value):
+        pass
 
